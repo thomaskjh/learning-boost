@@ -61,7 +61,7 @@ int main() {
 * progress_timer对象析构时自动打印从对象创建到析构的时间间隔
 
 # date
-#### 基本使用
+### 基本使用
 ```c++
 #include <iostream>
 #include <boost/date_time/gregorian/gregorian.hpp>
@@ -96,7 +96,7 @@ int main() {
 * min_date_time     最小日期
 * max_date_time     最大日期
 
-#### 日期长度 days/weeks/months/years
+### 日期长度 days/weeks/months/years
 
 ```c++
 date d(2016, 1, 1);
@@ -106,7 +106,7 @@ d += months(1); // 2016-02-09
 d += years(1);  // 2017-02-09
 ```
 
-#### 日期区间 date_period
+### 日期区间 date_period
 ```c++
 date_period p1(date(2016, 1, 1), date(2016, 1, 3));
 date_period p2(date(2016, 1, 2), days(3));
@@ -119,7 +119,7 @@ cout << p4.begin() << "," << p4.end() << endl;  // 2016-Jan-01,2016-Jan-05
 * date_period是一个左闭右开区间
 * intersection求区间交集, merge求区间并集
 
-#### 日期迭代器 date_iterator/day_iterator/week_iterator/month_iterator/year_iterator
+### 日期迭代器 date_iterator/day_iterator/week_iterator/month_iterator/year_iterator
 ```c++
 date d(2016, 1, 1);
 day_iterator iterator(d);
