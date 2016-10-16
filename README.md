@@ -13,7 +13,8 @@
 cmake_minimum_required(VERSION 3.5)
 project(learning_boost)
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17")
+set(CMAKE_CXX_COMPILER "/usr/local/Cellar/gcc/6.2.0/bin/g++-6")
 
 set(Boost_INCLUDE_DIR "/Users/jhk/Project/C++/boost_1_61_0")
 set(Boost_LIBRARY_DIR "/Users/jhk/Project/C++/boost_1_61_0/stage/lib")
@@ -21,16 +22,118 @@ set(Boost_USE_STATIC_LIBS OFF)
 set(Boost_USE_STATIC_RUNTIME OFF)
 set(Boost_USE_MULTITHREADED ON)
 
-find_package(Boost 1.61.0 COMPONENTS date_time)
+
+find_package(Boost 1.61.0 COMPONENTS date_time serialization unit_test_framework system filesystem program_options thread REQUIRED)
 
 if(Boost_FOUND)
     include_directories(${Boost_INCLUDE_DIR})
     set(SOURCE_FILES main.cpp)
     add_executable(learning_boost ${SOURCE_FILES})
     target_link_libraries( learning_boost ${Boost_LIBRARIES} )
-
 endif()
+
 ```
+
+# c++右值
+### 定义
+```c++
+int f() {
+    int a = 1 + 2;
+    return a;
+}
+```
+* 左值是非临时对象，可以在多条语句中使用的对象，例如上面的a；
+* 右值是临时对象，只在当前语句中有效，例如上面的1、2、1+2的结果，函数f的返回值；
+
+```c++
+#include <iostream>
+using namespace std;
+
+int f(int &a) {
+    cout << "left" << endl;
+    return a;
+}
+
+int f(int &&a) {
+    cout << "right" << endl;
+    return a;
+}
+
+int main(int argc, char * argv[]) {
+    int a = 1;
+    f(a);       // left
+    f(1);       // right
+    f(f(a));    // left right
+}
+```
+* 左值的声明符号为”&”， 为了和左值区分，右值的声明符号为”&&”
+
+### 右值的作用
+```c++
+#include <iostream>
+#include <vector>
+using namespace std;
+
+class A {
+public:
+    A() {
+        cout << "default construct" << endl;
+        arr = new int[10];
+    }
+
+    A(A &o) {
+        cout << "copy construct" << endl;
+        arr = new int[10];
+        std::copy(o.arr, o.arr + 10, arr);
+    }
+
+    A &operator=(A &o) {
+        cout << "copy operate=" << endl;
+        std::copy(o.arr, o.arr + 10, arr);
+        return *this;
+    }
+
+    // 转移构造函数
+    A(A &&o) {
+        cout << "move construct" << endl;
+        arr = o.arr;
+        o.arr = nullptr;
+    }
+
+    // 转移赋值函数
+    A &operator=(A &&o) {
+        cout << "move operate=" << endl;
+        arr = o.arr;
+        o.arr = nullptr;
+        return *this;
+    }
+    
+    ~A() {
+        if(arr != nullptr) {
+            delete []arr;
+            arr = nullptr;
+        }
+    }
+
+private:
+    int *arr;
+};
+
+
+int main(int argc, char *argv[]) {
+
+    A a;                // default construct
+    A b = a;            // copy construct
+    A c = move(a);      // move construct
+
+    vector<A> v;
+    v.push_back(A());   // default construct    move construct
+}
+```
+* 对于右值的拷贝和赋值会调用转移构造函数和转移赋值操作符；如果转移构造函数和转移拷贝操作符没有定义，那么就遵循现有的机制，拷贝构造函数和赋值操作符会被调用。
+* 转移构造和转移赋值的作用是避免资源的重复申请，直接使用临时对象已经申请的资源，因此在函数中必须对右值参数的资源和标识进行修改，避免右值的析构函数就会释放资源；
+* 如果已知一个命名对象不再被使用，想将这个左值引用当右值引用使用，可以使用std::move();
+
 
 # std::tuple
 ```c++
@@ -292,6 +395,467 @@ int main() {
 ```
 * ref()函数返回reference_wrapper包装类型，通过get()可以被包装对象的引用；
 
+# std::bind
+```c++
+#include <iostream>
+#include <functional>
+
+using namespace std;
+
+void f1(int x, int &y) {
+    cout << x << ", " << y << endl;
+    x *= 2;
+    y *= 2;
+}
+
+class demo {
+public:
+    void f2(int a, int b) {
+        cout << a << ", " << b << ", " << time++ << endl;
+    }
+
+    int time = 0;
+};
+
+class func {
+public:
+    void operator()(int a, int b) {
+        cout << this << endl;
+    }
+};
+
+int main(int argc, char * argv[]) {
+
+    int x = 7;
+    int y = 8;
+    auto b1 = bind(f1, std::placeholders::_2, std::placeholders::_1);
+    b1(x, y);                           // 8, 7
+    cout << x << ", " << y << endl;     // 14, 8
+
+    demo d;
+    auto b3 = bind(&demo::f2, std::placeholders::_1, 5, 6);
+    b3(d);                          // 5, 6, 0
+    cout << d.time << endl;         // 1
+
+    func c;
+    cout << &c << endl;             // 0x7fff5c077a30
+    bind(ref(c), 7, 8)();           // 0x7fff5c077a30
+    bind(c, 7, 8)();                // 0x7fff5c0779f8
+
+    return 0;
+}
+```
+* _1、_2、_3、..._9是bind的参数占位符，表示函数调用的实际参数列表；
+* 调用时参数是传值还是引用，只取决于函数原型定义时是否为引用类型的参数；
+* 绑定类的成员函数时，成员函数前必须加上取地址操作符&，且第一个参数必须是类对象，该类对象在方法调用时均为引用类型；
+* 绑定函数对象时，如果函数对象的拷贝代价大，可以使用ref进行包装；
+
+# std:function
+```c++
+#include <iostream>
+#include <boost/lexical_cast.hpp>
+using namespace std;
+
+string f1(int a, int b) {
+    return boost::lexical_cast<string>(a) + ", " + boost::lexical_cast<string>(b);
+}
+
+class demo {
+public:
+    string f2(int a, int b) {
+        return boost::lexical_cast<string>(a) + ", " + boost::lexical_cast<string>(b);
+    }
+};
+
+class f3 {
+public:
+    string operator()(int a, int b) {
+        return boost::lexical_cast<string>(a) + ", " + boost::lexical_cast<string>(b);
+    }
+};
+
+int main(int argc, char * argv[]) {
+
+    function<string(int,int)> c1;
+
+    c1 = f1;
+    cout << c1(1, 2) << endl;       // 1, 2
+
+    function<string(int)> c2;
+    demo d;
+    c2 = bind(&demo::f2, d, placeholders::_1, 4);
+    cout << c2(3) << endl;          // 3 4
+
+    function<string()> c3;
+    f3 o;
+    c3 = bind(ref(o), 5, 6);
+    cout << c3() << endl;           // 5 6
+
+    return 0;
+}
+```
+* 与原始的函数指针相比，function对象的体积稍微大一点，速度也稍微慢一点（10%左右的性能差距），但它带给程序了巨大的灵活性；
+* 处理函数对象时，如果拷贝代价很大，可以使用ref进行包装；
+
+# 线程
+### std::mutex
+```c++
+#include <iostream>
+#include <thread>
+using namespace std;
+
+void f1(mutex &m) {
+    try {
+        m.lock();
+        for(int i = 0; i < 10; ++i) {
+            cout << i << endl;
+            this_thread::sleep_for(chrono::milliseconds(10));
+        }
+        m.unlock();
+    } catch (...) {
+        m.unlock();
+    }
+}
+
+void f2(mutex &m) {
+    try {
+        bool flag = m.try_lock();
+        if(flag) {
+            for(int i = 100; i < 110; ++i) {
+                cout << i << endl;
+                this_thread::sleep_until(chrono::steady_clock::now() + chrono::milliseconds(10));
+            }
+        }
+        m.unlock();
+    } catch (...) {
+        m.unlock();
+    }
+}
+
+int main(int argc, char * argv[]) {
+    mutex m;
+    thread t1(f1, ref(m));
+    thread t2(f2, ref(m));
+    t1.join();
+    t2.join();
+}
+```
+* lock()，阻塞等待直到获得互斥量的所有权；
+* try_lock()，尝试锁定互斥量，成功返回true，否则返回false；
+
+### std::timed_mutex
+```c++
+#include <iostream>
+#include <thread>
+using namespace std;
+
+void f1(timed_mutex &m) {
+    try {
+        bool flag = m.try_lock_for(chrono::seconds(1));
+        if(flag) {
+            for(int i = 0; i < 10; ++i) {
+                cout << i << endl;
+                this_thread::sleep_for(chrono::milliseconds(10));
+            }
+        }
+        m.unlock();
+    } catch (...) {
+        m.unlock();
+    }
+}
+
+void f2(timed_mutex &m) {
+    try {
+        bool flag = m.try_lock_until(chrono::system_clock::now() + chrono::seconds(1));
+        if(flag) {
+            for(int i = 100; i < 110; ++i) {
+                cout << i << endl;
+                this_thread::sleep_until(chrono::steady_clock::now() + chrono::milliseconds(10));
+            }
+        }
+        m.unlock();
+    } catch (...) {
+        m.unlock();
+    }
+}
+
+int main(int argc, char * argv[]) {
+    timed_mutex m;
+    thread t1(f1, ref(m));
+    thread t2(f2, ref(m));
+    t1.join();
+    t2.join();
+}
+```
+* try_lock_for()、try_lock_until()阻塞等待一定的时间试图锁定互斥量，如果时间到还未锁定则返回false；
+
+### std::recursive_mutex
+```c++
+#include <iostream>
+#include <thread>
+using namespace std;
+
+void f(recursive_mutex &m) {
+    m.lock();
+    m.lock();
+    m.unlock();
+    m.unlock();
+}
+
+int main(int argc, char * argv[]) {
+    recursive_mutex m;
+    thread t(f, ref(m));
+    t.join();
+}
+```
+* recursive_mutex，允许同一线程进行多次lock()，但相应的也要多次unlock();
+
+### std::recursive_timed_mutex
+* 相当于 timed_mutex + recursive_mutex；
+
+### std::shared_mutex
+```c++
+#include <iostream>
+#include <thread>
+#include <mutex>
+#include <shared_mutex>
+
+using namespace std;
+
+class Counter {
+public:
+    Counter() {
+        _value = 0;
+    }
+
+    int get() {
+        shared_lock<shared_mutex> lock(m);
+        return _value;
+    }
+
+    void inc() {
+        unique_lock<shared_mutex> lock(m);
+        ++_value;
+    }
+
+private:
+    int _value;
+    shared_mutex m;
+};
+
+int main(int argc, char * argv[]) {
+
+    mutex m;
+    Counter counter;
+    auto f = [&counter,&m]() {
+        for(int i = 0; i < 3; ++i) {
+            counter.inc();
+            unique_lock<mutex> lock(m);
+            cout << this_thread::get_id() << ": " << counter.get() << endl;
+        }
+    };
+
+    thread t1(f);
+    thread t2(f);
+    t1.join();
+    t2.join();
+}
+```
+* shared_mutex，又叫读写锁，允许多个线程同时获取读锁，但只允许一个线程获取写锁；
+
+### std::thread
+```c++
+#include <iostream>
+#include <thread>
+#include <mutex>
+
+using namespace std;
+
+void handling(int t) {
+    cout << this_thread::get_id() << endl;
+    this_thread::sleep_for(chrono::seconds(t));
+}
+
+int main(int argc, char * argv[]) {
+    cout << this_thread::get_id() << endl;                                      // 0x7fff74d6d000
+
+    thread t1(handling, 2);                                                     // 0x700000081000
+    cout << t1.joinable() << endl;                                              // 1
+    t1.detach();
+    cout << t1.joinable() << endl;                                              // 0
+
+    thread t2(std::bind(handling, std::placeholders::_1), 2);                   // 0x700000104000
+    t2.join();
+
+    std::function<void()> f = std::bind(handling, 2);
+    thread t3(f);                                                               // 0x700000081000
+    cout << t3.get_id() << endl;                                                // 0x700000081000
+    t3.join();
+    cout << (t3.get_id() == thread::id()) << endl;                              // 1
+
+    return 0;
+}
+```
+* thread()对象一创建就立即执行；
+* join()会阻塞等待线程结束；
+* joinable()表示thread对象是否含有线程执行体，也就是线程执行体知否正在执行；
+* get_id()返回线程id对象；
+* detach()将thread对象与线程执行体手动分离；
+* 一个thread对象，必须调用join()或detach()，否则抛异常；
+
+### std::condition_variable_any
+```c++
+#include <iostream>
+#include <thread>
+#include <mutex>
+#include <stack>
+
+using namespace std;
+
+class Buffer {
+public:
+
+    void put(int x) {
+
+        while(data.size() == 10) {
+            {
+                lock_guard<mutex> l(io_mutex);
+                cout << "buf is full" << endl;
+            }
+            conf_put.wait(data_mutex);
+        }
+        data.push(x);
+        conf_get.notify_one();
+
+        {
+            lock_guard<mutex> l(io_mutex);
+            cout << "put ok" << endl;
+        }
+    }
+
+    void get() {
+        while(data.size() == 0) {
+            {
+                lock_guard<mutex> l(io_mutex);
+                cout << "buf is empty" << endl;
+            }
+            conf_get.wait(data_mutex);
+        }
+        int x = data.top();
+        data.pop();
+        conf_put.notify_one();
+
+        {
+            lock_guard<mutex> l(io_mutex);
+            cout << "get ok" << endl;
+        }
+    }
+
+private:
+    stack<int> data;
+    condition_variable_any conf_put;
+    condition_variable_any conf_get;
+    mutex data_mutex;
+    mutex io_mutex;
+};
+
+int main(int argc, char * argv[]) {
+
+    Buffer buffer;
+
+    auto putter = [&buffer]() {
+        for(int i = 0; i < 20; ++i) {
+            buffer.put(i);
+            this_thread::sleep_for(chrono::milliseconds(10));
+        }
+    };
+
+    auto getter = [&buffer]() {
+        for(int i = 0; i < 10; ++i) {
+            buffer.get();
+            this_thread::sleep_for(chrono::milliseconds(50));
+        }
+    };
+
+    thread t1(putter);
+    thread t2(getter);
+    thread t3(getter);
+
+    t1.join();
+    t2.join();
+    t3.join();
+
+    return 0;
+}
+```
+* 调用条件变量condition_variable_any.wait()会使线程阻塞等待，直到其他线程调用该条件变量的notify_one()或notify_all()，才会通知一个或所有正在等待条件变量的线程继续执行；
+* wait()调用时会暂时解锁互斥锁，直到条件变量满足时，线程重新拥有互斥锁；
+
+### std::packaged_task
+```c++
+#include <iostream>
+#include <thread>
+#include <future>
+
+using namespace std;
+
+int main(int argc, char * argv[]) {
+
+    packaged_task<int(int, int)> t1([](int a, int b) {
+        return a + b;
+    });
+    future<int> f1 = t1.get_future();
+    t1(1, 2);
+    cout << f1.get() << endl;                   // 3
+
+    packaged_task<double()> t2(bind([](int x) {
+        this_thread::sleep_for(chrono::seconds(1));
+        return 100.0 * x;
+    }, 2));
+    future<double> f2 = t2.get_future();
+    thread t(move(t2));
+    f2.wait();
+    cout << f2.get() << endl;                   // 200
+    t.join();
+
+    return 0;
+}
+```
+* packaged_task用来包装可回调物，get_future()用来获取异步调用结果；
+* packaged_task类似function，并提供operator()，直接调用内部的可回调物；
+* packaged_task是不可拷贝的，当作为thread参数时，必须使用std::move()转换为右值引用，此后packaged_task对象将不能使用；
+* future.wait()会阻塞线程，直到线程执行完成，可以获取调用结果；
+
+### std::promise
+```c++
+#include <iostream>
+#include <thread>
+#include <future>
+
+using namespace std;
+
+void f(promise<int> *p1, promise<double> *p2) {
+    this_thread::sleep_for(chrono::seconds(1));
+    p1->set_value_at_thread_exit(1);
+    p2->set_value(8.8);
+}
+
+int main(int argc, char * argv[]) {
+
+    promise<int> p1;
+    promise<double> p2;
+    future<int> f1 = p1.get_future();
+    future<double> f2 = p2.get_future();
+
+    thread t(f, &p1, &p2);
+    t.join();
+    cout << f1.get() << endl;       // 1
+    cout << f2.get() << endl;       // 8.8
+
+    return 0;
+}
+```
+* promise也用于异步调用返回值，只是它不是包装一个可回调物，而是包装一个值，类似函数的引用参数，通过参数传递处理结果；
 
 # timer
 ```c++
@@ -1416,87 +1980,255 @@ int main(int argc, char * argv[]) {
 }
 ```
 
-# bind
+# asio
+### 异常处理与错误代码
 ```c++
 #include <iostream>
+#include <boost/asio.hpp>
 #include <boost/bind.hpp>
+#include <boost/date_time/posix_time/posix_time.hpp>
 
-using namespace std;
-using namespace boost;
-
-void f1(int a, int b) {
-    cout << a << ", " << b << endl;
-}
-
-class demo {
-public:
-    void f2(int a, int b) {
-        cout << a << ", " << b << endl;
-    }
-};
-
-class func1 {
-public:
-    int operator()(int a, int b) {
-        cout << a << ", " << b << endl;
-        return 0;
-    }
-};
-
-class func2 {
-public:
-    typedef int result_type;
-    int operator()(int a, int b) {
-        cout << a << ", " << b << endl;
-        return 0;
-    }
-};
+using namespace boost::asio;
+using namespace boost::system;
+using namespace boost::posix_time;
 
 int main(int argc, char * argv[]) {
 
-    auto b1 = bind(f1, _2, _1);
-    b1(1, 2);                       // 2, 1
+    io_service service;
+    ip::tcp::socket sock(service);
+    ip::tcp::endpoint ep;
 
-    auto b2 = bind(f1, _1, 4);
-    b2(3);                          // 3, 4
+    // 抛出异常方式
+    try {
+        sock.connect(ep);
+    } catch (system_error &e) {
+        std::cout << e.code() << std::endl;
+    }
 
-    demo d;
-    auto b3 = bind(&demo::f2, _1, 5, 6);
-    b3(d);                          // 5, 6
-    b3(boost::ref(d));              // 5, 6
-    b3(&d);                         // 5, 6
-
-    func1 c1;
-    auto b4 = bind<int>(boost::ref(c1), 7, 8);
-    b4();                           // 7, 8
-
-    func2 c2;
-    auto b5 = bind(c2, 9, 10);
-    b5();                           // 9, 10
+    // 错误码方式
+    error_code code;
+    sock.connect(ep, code);
+    if(code) {
+        std::cout << code.message() << std::endl;
+    }
 
     return 0;
 }
 ```
-* _1、_2、_3、..._9是bind的参数占位符，表示函数调用的实际参数列表；
-* 绑定成员函数时，成员函数前必须加上取地址操作符&，且第一个参数必须是对象或对象指针；
-* 绑定函数对象时，如果函数对象没有定义result_type，则bind需要使用模板参数指明返回类型；
-* bind采用拷贝的方式存储绑定对象和参数，乳沟拷贝代价很大，可以使用ref进行包装；
+* asio所有的异步函数都有抛出异常和返回错误码两种方式的重载；当异步调用，回调函数都是按返回错误码的方式，因为此时抛出异常毫无意义，没有人会捕获到它；
 
-# function
+### deadline_time
+```c++
+#include <iostream>
+#include <boost/asio.hpp>
+#include <boost/bind.hpp>
+#include <boost/date_time/posix_time/posix_time.hpp>
 
-# thread
+using namespace boost::asio;
+using namespace boost::system;
+using namespace boost::posix_time;
 
-# signal2
+void print(deadline_timer &t, const error_code &) {
+    std::cout << t.expires_at() << std::endl;
+}
 
-# bio
+void sync() {
+    io_service ios;
+    deadline_timer t(ios, seconds(2));
+    t.wait();
+    print(t, error_code());
+}
 
-# config
+void async() {
+    io_service ios;
+    deadline_timer t(ios, seconds(2));
+    t.async_wait(std::bind(print, std::ref(t), std::placeholders::_1));
+    ios.run();
+}
+
+int main(int argc, char * argv[]) {
+
+    sync();
+    async();
+
+    return 0;
+}
+```
+
+### ip::address
+```c++
+#include <iostream>
+#include <boost/asio.hpp>
+#include <boost/bind.hpp>
+#include <boost/date_time/posix_time/posix_time.hpp>
+
+using namespace boost::asio;
+using namespace boost::system;
+using namespace boost::posix_time;
+
+int main(int argc, char * argv[]) {
+
+    ip::address addr1 = ip::address::from_string("127.0.0.1");
+
+    std::cout << addr1.to_string() << std::endl;    // 127.0.0.1
+    std::cout << addr1.is_v4() << std::endl;        // 1
+
+    ip::address addr2 = ip::address::from_string("fe80::20c:29ff:fe10:cf0e");
+    std::cout << addr2.is_v6() << std::endl;        // 1
+
+    return 0;
+}
+```
+
+### ip::tcp::endpoint
+```c++
+#include <iostream>
+#include <boost/asio.hpp>
+#include <boost/bind.hpp>
+#include <boost/date_time/posix_time/posix_time.hpp>
+
+using namespace boost::asio;
+using namespace boost::system;
+using namespace boost::posix_time;
+
+int main(int argc, char * argv[]) {
+
+    // 创建服务器socket
+    ip::tcp::endpoint ep1(ip::tcp::v4(), 80);
+
+    // 创建客户端socket
+    ip::tcp::endpoint ep2(ip::address::from_string("127.0.0.1"), 80);
+
+    // 根据域名返回对应的endpoint列表
+    try {
+        io_service service;
+        ip::tcp::resolver resolver(service);
+        ip::tcp::resolver::query query("www.baidu.com", "80");
+        ip::tcp::resolver::iterator iter = resolver.resolve(query);
+        ip::tcp::resolver::iterator end;
+        for(; iter != end; ++iter) {
+            ip::tcp::endpoint ep = *iter;
+            std::cout << ep.address().to_string() << std::endl;     // 14.215.177.37    14.215.177.38
+        }
+    } catch (system_error &e) {
+        std::cout << e.what() << std::endl;
+    }
+
+    return 0;
+}
+```
+
+## strand
+```c++
+#include <iostream>
+#include <boost/asio.hpp>
+#include <boost/date_time/posix_time/posix_time.hpp>
+#include <boost/bind.hpp>
+#include <boost/thread.hpp>
+
+using namespace std;
+using namespace boost;
+
+class printer {
+public:
+    printer(asio::io_service &io)
+            :_strand(io),
+             _t1(io, posix_time::seconds(1)),
+             _t2(io, posix_time::seconds(1)),
+             _count(0) {
+        _t1.async_wait(_strand.wrap(bind(&printer::print1, this)));
+        _t1.async_wait(_strand.wrap(bind(&printer::print2, this)));
+    }
+
+    void print1() {
+        cout << "timer 1 : " << _count++ << ", " << this_thread::get_id() << endl;
+        _t1.expires_from_now(posix_time::seconds(1));
+        _t1.async_wait(_strand.wrap(bind(&printer::print1, this)));
+    }
 
 
+    void print2() {
+        cout << "timer 2 : " << _count++ << ", " << this_thread::get_id() << endl;
+        _t2.expires_from_now(posix_time::seconds(1));
+        _t2.async_wait(_strand.wrap(bind(&printer::print2, this)));
+    }
 
+private:
+    asio::strand _strand;
+    asio::deadline_timer _t1;
+    asio::deadline_timer _t2;
+    int _count;
+};
 
+int main(int argc, char * argv[]) {
+    asio::io_service io;
+    printer p(io);
+    thread t1(bind(&asio::io_service::run, &io));
+    thread t2(bind(&asio::io_service::run, &io));
+    io.run();
+    t1.join();
+    t2.join();
+    return 0;
+}
+```
 
+### TCP同步
+```c++
+// server
+#include <iostream>
+#include <string>
+#include <boost/asio.hpp>
+#include <boost/system/system_error.hpp>
 
+using namespace boost;
+using namespace boost::asio;
+using namespace std;
 
+int main() {
+    try {
+        io_service io;
+        ip::tcp::acceptor acceptor(io, ip::tcp::endpoint(ip::tcp::v4(), 32770));
+        while (true) {
+            ip::tcp::socket socket(io);
+            acceptor.accept(socket);
+            string message = "hello world";
+            socket.write_some(buffer(message));
+        }
+    } catch (system::system_error &e) {
 
+    }
+}
+```
+```c++
+// client
+#include <iostream>
+#include <boost/asio.hpp>
+#include <boost/date_time/posix_time/posix_time.hpp>
+#include <boost/bind.hpp>
+#include <boost/thread.hpp>
+#include <boost/system/system_error.hpp>
+
+using namespace std;
+using namespace boost;
+using namespace boost::asio;
+
+int main(int argc, char * argv[]) {
+
+    try {
+        io_service io;
+        ip::tcp::endpoint ep(ip::address::from_string("127.0.0.1"), 32770);
+        ip::tcp::socket socket(io);
+        socket.connect(ep);
+        boost::array<char, 128> buf;
+        size_t len = socket.read_some(buffer(buf));
+        cout.write(buf.data(), len);
+        socket.close();
+    } catch (system_error &e) {
+        cout << e.what() << endl;
+    }
+
+    return 0;
+}
+```
+* 同步方式，io_service不需要执行run();
 
